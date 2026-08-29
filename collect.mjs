@@ -55,21 +55,6 @@ async function fetchWithRetry(url) {
   throw new Error("GitHub APIからデータを取得できませんでした");
 }
 
-function snapshotFields(repo) {
-  return {
-    full_name: repo.full_name,
-    stargazers_count: repo.stargazers_count,
-    forks_count: repo.forks_count,
-    open_issues_count: repo.open_issues_count,
-    pushed_at: repo.pushed_at,
-    created_at: repo.created_at,
-    language: repo.language,
-    description: repo.description,
-    archived: repo.archived,
-    html_url: repo.html_url,
-  };
-}
-
 function parseSnapshotDate(fileName) {
   const match = /^(\d{4}-\d{2}-\d{2})\.json$/.exec(fileName);
   if (!match) return null;
@@ -92,7 +77,7 @@ async function main() {
     const response = await fetchWithRetry(`${API_URL}?${query}`);
     const body = await response.json();
     if (!Array.isArray(body.items)) throw new Error("GitHub APIの応答形式が不正です");
-    collected.push(...body.items.map(snapshotFields));
+    collected.push(...body.items);
     console.log(`${page}/${pages} ページを取得しました`);
   }
 
@@ -100,10 +85,9 @@ async function main() {
   const today = generatedAt.toISOString().slice(0, 10);
   const todayTimestamp = Date.parse(`${today}T00:00:00.000Z`);
   await mkdir(SNAPSHOT_DIR, { recursive: true });
-  await writeFile(
-    path.join(SNAPSHOT_DIR, `${today}.json`),
-    `${JSON.stringify(collected, null, 2)}\n`,
-  );
+  // 毎日蓄積するスナップショットには、勢いの計算に必要な名前とstar数だけを保存する。
+  const snapshot = collected.map((repo) => [repo.full_name, repo.stargazers_count]);
+  await writeFile(path.join(SNAPSHOT_DIR, `${today}.json`), JSON.stringify(snapshot));
 
   const snapshotDates = (await readdir(SNAPSHOT_DIR))
     .map(parseSnapshotDate)
@@ -121,21 +105,32 @@ async function main() {
     const previous = JSON.parse(
       await readFile(path.join(SNAPSHOT_DIR, comparison.fileName), "utf8"),
     );
-    if (!Array.isArray(previous)) throw new Error(`${comparison.fileName} の形式が不正です`);
-    previousByName = new Map(previous.map((repo) => [repo.full_name, repo]));
+    if (
+      !Array.isArray(previous) ||
+      previous.some(
+        (repo) =>
+          !Array.isArray(repo) ||
+          repo.length !== 2 ||
+          typeof repo[0] !== "string" ||
+          typeof repo[1] !== "number",
+      )
+    ) {
+      throw new Error(`${comparison.fileName} の形式が不正です`);
+    }
+    previousByName = new Map(previous);
     velocityDays = (todayTimestamp - comparison.timestamp) / DAY_MS;
   }
 
   const repos = collected.map((repo) => {
-    const previous = previousByName?.get(repo.full_name);
-    const velocity = previous
-      ? Number(((repo.stargazers_count - previous.stargazers_count) / velocityDays).toFixed(1))
+    const previousStars = previousByName?.get(repo.full_name);
+    const velocity = previousStars !== undefined
+      ? Number(((repo.stargazers_count - previousStars) / velocityDays).toFixed(1))
       : null;
     return {
       full_name: repo.full_name,
       html_url: repo.html_url,
       language: repo.language,
-      description: repo.description,
+      description: repo.description?.slice(0, 120) ?? null,
       stars: repo.stargazers_count,
       forks: repo.forks_count,
       open_issues: repo.open_issues_count,
@@ -143,18 +138,30 @@ async function main() {
       created_at: repo.created_at,
       archived: repo.archived,
       velocity,
-      velocity_days: previous ? velocityDays : null,
+      velocity_days: previousStars !== undefined ? velocityDays : null,
     };
   });
+
+  // 累計star上位200件と勢い上位200件を合わせ、重複を除いて累計star順に並べる。
+  const topByStars = [...repos].sort((a, b) => b.stars - a.stars).slice(0, 200);
+  const topByVelocity = repos
+    .filter((repo) => repo.velocity !== null)
+    .sort((a, b) => b.velocity - a.velocity)
+    .slice(0, 200);
+  const selectedByName = new Map(
+    [...topByStars, ...topByVelocity].map((repo) => [repo.full_name, repo]),
+  );
+  const selectedRepos = [...selectedByName.values()].sort((a, b) => b.stars - a.stars);
 
   const latest = {
     generated_at: generatedAt.toISOString(),
     observed_since: snapshotDates[0].date,
     days_recorded: snapshotDates.length,
     compared_with: comparison?.date ?? null,
-    repos,
+    total_tracked: collected.length,
+    repos: selectedRepos,
   };
-  await writeFile(LATEST_PATH, `${JSON.stringify(latest, null, 2)}\n`);
+  await writeFile(LATEST_PATH, JSON.stringify(latest));
   console.log(`${collected.length}件を収集し、${LATEST_PATH} を更新しました`);
 }
 
