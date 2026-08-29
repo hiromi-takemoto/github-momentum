@@ -39,6 +39,8 @@
       color: #4b5563;
     }
 
+    .star-note { margin: 6px 0 0; color: #4b5563; font-size: 0.875rem; }
+
     .observation {
       margin: 28px 0 0;
       font-weight: 600;
@@ -47,9 +49,14 @@
 
     .controls {
       display: flex;
+      flex-wrap: wrap;
       gap: 8px;
       margin: 24px 0 16px;
     }
+
+    .control-group { display: flex; gap: 8px; }
+    .control-group + .control-group { margin-left: 16px; }
+    .translation-progress { margin: -8px 0 16px; color: #4b5563; font-size: 0.875rem; }
 
     button {
       min-height: 42px;
@@ -69,10 +76,13 @@
       color: #ffffff;
     }
 
-    button:focus-visible, a:focus-visible {
+    button:focus-visible, a:focus-visible, [tabindex="0"]:focus-visible {
       outline: 3px solid #0b4fc4;
       outline-offset: 2px;
     }
+
+    .info-trigger { min-height: 24px; margin-left: 2px; padding: 0 2px; border: 0; background: transparent; color: #0b4fc4; font-size: 0.75rem; line-height: 1; vertical-align: middle; }
+    .tooltip { position: fixed; z-index: 10; width: max-content; max-width: min(320px, calc(100vw - 24px)); padding: 9px 11px; border-radius: 6px; background: #16181d; color: #ffffff; font-size: 0.8125rem; font-weight: 400; line-height: 1.5; white-space: normal; box-shadow: 0 3px 12px rgb(22 24 29 / 25%); pointer-events: none; }
 
     button:disabled {
       border-color: #d7dae0;
@@ -125,7 +135,7 @@
 
     .rank { width: 68px; }
     .repo { width: 44%; }
-    .language { width: 14%; }
+    .genre { width: 18%; }
     .velocity { width: 130px; }
     .stars { width: 120px; }
     .status { width: 104px; }
@@ -141,6 +151,11 @@
       font-weight: 700;
       overflow-wrap: anywhere;
     }
+
+    .genre-trigger { display: inline-flex; align-items: center; gap: 5px; border-radius: 3px; cursor: help; }
+    .repo-genre-trigger { display: none; }
+    .genre-icon { flex: 0 0 auto; }
+    .untranslated { margin-left: 5px; color: #4b5563; font-size: 0.6875rem; white-space: nowrap; }
 
     .status-badge { display: none; }
 
@@ -171,27 +186,34 @@
       }
 
       .observation { font-size: 0.9375rem; }
-      .controls button { flex: 1; }
+      .control-group { flex: 1 1 100%; }
+      .control-group + .control-group { margin-left: 0; }
+      .control-group button { flex: 1; padding-inline: 8px; }
 
       .table-wrap { overflow-x: hidden; }
 
       table {
+        width: 100%;
+        max-width: 100%;
         min-width: 0;
         table-layout: fixed;
       }
 
-      th, td { padding: 11px 4px; }
+      th, td { padding: 11px 3px; }
       th { font-size: 0.75rem; }
 
       .rank {
-        width: 40px;
-        max-width: 40px;
+        width: 32px;
+        max-width: 32px;
       }
 
       .repo { width: auto; }
-      .language, .status { display: none; }
+      .genre, .status { display: none; }
+      .repo-genre-trigger { display: inline-flex; }
 
-      .velocity, .stars { width: 80px; }
+      .velocity { width: 68px; }
+      .stars { width: 70px; }
+      .info-trigger { margin-left: 0; }
 
       .repo-title {
         display: flex;
@@ -234,13 +256,22 @@
     <header>
       <h1>GitHub Momentum</h1>
       <p class="lead">star数の合計ではなく、いま1日あたり何star増えているかで並べます。</p>
+      <p class="star-note">star（スター）とは、GitHubの利用者が「これ良い」と思ったときに押す印です。お気に入り登録のようなものです。</p>
       <p id="observation" class="observation" aria-live="polite">観測状況を読み込んでいます</p>
     </header>
 
-    <div class="controls" aria-label="並べ替え">
-      <button id="sort-velocity" type="button" disabled>勢い順</button>
-      <button id="sort-stars" type="button" disabled>累計star順</button>
+    <div class="controls">
+      <div class="control-group" aria-label="並べ替え">
+        <button id="sort-velocity" type="button" disabled>勢い順</button>
+        <button id="sort-stars" type="button" disabled>累計star順</button>
+      </div>
+      <div class="control-group" aria-label="説明文の表示言語">
+        <button id="description-ja" type="button" aria-pressed="true">日本語</button>
+        <button id="description-en" type="button" aria-pressed="false">原文(英語)</button>
+      </div>
     </div>
+
+    <p id="translation-progress" class="translation-progress" hidden></p>
 
     <p id="notice" class="notice" hidden>記録が1日分しかないため、勢いはまだ計算できません。明日から表示されます。</p>
     <p id="error" class="error" role="status" hidden>データを読み込めませんでした</p>
@@ -251,15 +282,16 @@
           <tr>
             <th class="rank numeric" scope="col">順位</th>
             <th class="repo" scope="col">リポジトリ</th>
-            <th class="language" scope="col">言語</th>
-            <th class="velocity numeric" scope="col">勢い</th>
-            <th class="stars numeric" scope="col">累計star</th>
-            <th class="status" scope="col">状態</th>
+            <th class="genre" scope="col">ジャンル <button class="info-trigger" type="button" data-tooltip="そのソフトが何の仲間かを自動で判定したものです。3%ほどは判定できず『その他』になります。" aria-label="ジャンルの説明">ⓘ</button></th>
+            <th class="velocity numeric" scope="col">勢い <button class="info-trigger" type="button" data-tooltip="1日あたりstarがいくつ増えたかです。数が大きいほど、今まさに人気が伸びています。" aria-label="勢いの説明">ⓘ</button></th>
+            <th class="stars numeric" scope="col">累計star <button class="info-trigger" type="button" data-tooltip="これまでに集めたstarの合計です。古いソフトほど大きくなりやすく、今の勢いとは別物です。" aria-label="累計starの説明">ⓘ</button></th>
+            <th class="status" scope="col">状態 <button class="info-trigger" type="button" data-tooltip="更新が止まっているものに印が付きます。『更新停止』は半年以上更新なし、『保存済み』は作者が更新をやめたものです。" aria-label="状態の説明">ⓘ</button></th>
           </tr>
         </thead>
         <tbody id="repo-list"></tbody>
       </table>
     </div>
+    <div id="tooltip" class="tooltip" role="tooltip" hidden></div>
   </main>
 
   <script>
@@ -270,10 +302,17 @@
     const repoList = document.querySelector("#repo-list");
     const velocityButton = document.querySelector("#sort-velocity");
     const starsButton = document.querySelector("#sort-stars");
+    const japaneseButton = document.querySelector("#description-ja");
+    const englishButton = document.querySelector("#description-en");
+    const translationProgress = document.querySelector("#translation-progress");
+    const tooltip = document.querySelector("#tooltip");
 
     let repositories = [];
+    let genresById = new Map();
     let referenceTime = Date.now();
     let sortMode = "stars";
+    let descriptionLanguage = "ja";
+    let tooltipTrigger = null;
 
     const numberFormat = new Intl.NumberFormat("en-US");
 
@@ -296,6 +335,16 @@
       const cell = document.createElement("td");
       cell.className = className;
       return cell;
+    }
+
+    function formatDate(value) {
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? "指定なし" : date.toLocaleDateString("ja-JP");
+    }
+
+    function makeTooltipText(repo, genre) {
+      const topics = repo.topics?.length ? repo.topics.join("、") : "指定なし";
+      return `${genre.label} ／ ${repo.language || "指定なし"} ／ 最終更新日 ${formatDate(repo.pushed_at)} ／ 分類タグ ${topics}`;
     }
 
     function render() {
@@ -323,9 +372,23 @@
         link.className = "repo-link";
         link.href = repo.html_url;
         link.textContent = repo.full_name;
+        const genre = genresById.get(repo.genre) || { icon: "❓", label: "その他", desc: "自動で分類できなかったものです。" };
+        link.dataset.tooltip = makeTooltipText(repo, genre);
+        link.setAttribute("aria-describedby", "tooltip");
         const repoTitle = document.createElement("div");
         repoTitle.className = "repo-title";
-        repoTitle.append(link);
+        const repoGenreTrigger = document.createElement("span");
+        repoGenreTrigger.className = "genre-trigger repo-genre-trigger";
+        repoGenreTrigger.tabIndex = 0;
+        repoGenreTrigger.dataset.tooltip = `${genre.label}: ${genre.desc}`;
+        repoGenreTrigger.setAttribute("aria-label", `${genre.label}: ${genre.desc}`);
+        repoGenreTrigger.setAttribute("aria-describedby", "tooltip");
+        const repoGenreIcon = document.createElement("span");
+        repoGenreIcon.className = "genre-icon";
+        repoGenreIcon.textContent = genre.icon;
+        repoGenreIcon.setAttribute("aria-hidden", "true");
+        repoGenreTrigger.append(repoGenreIcon);
+        repoTitle.append(repoGenreTrigger, link);
         if (status.label) {
           const statusBadge = document.createElement("span");
           statusBadge.className = `status-badge ${status.className}`;
@@ -336,13 +399,33 @@
         if (repo.description) {
           const description = document.createElement("span");
           description.className = "description";
-          description.textContent = repo.description;
-          description.title = repo.description;
+          const translated = descriptionLanguage === "ja" && repo.description_ja;
+          description.textContent = translated || repo.description;
+          if (descriptionLanguage === "ja" && !repo.description_ja) {
+            const untranslated = document.createElement("small");
+            untranslated.className = "untranslated";
+            untranslated.textContent = "未翻訳";
+            description.append(untranslated);
+          }
           repoCell.append(description);
         }
 
-        const languageCell = makeCell("language");
-        languageCell.textContent = repo.language || "—";
+        const genreCell = makeCell("genre");
+        const genreTrigger = document.createElement("span");
+        genreTrigger.className = "genre-trigger";
+        genreTrigger.tabIndex = 0;
+        genreTrigger.dataset.tooltip = `${genre.label}: ${genre.desc}`;
+        genreTrigger.setAttribute("aria-label", `${genre.label}: ${genre.desc}`);
+        genreTrigger.setAttribute("aria-describedby", "tooltip");
+        const genreIcon = document.createElement("span");
+        genreIcon.className = "genre-icon";
+        genreIcon.textContent = genre.icon;
+        genreIcon.setAttribute("aria-hidden", "true");
+        const genreLabel = document.createElement("span");
+        genreLabel.className = "genre-label";
+        genreLabel.textContent = genre.label;
+        genreTrigger.append(genreIcon, genreLabel);
+        genreCell.append(genreTrigger);
 
         const velocityCell = makeCell("velocity numeric");
         if (typeof repo.velocity === "number") {
@@ -359,13 +442,15 @@
         const statusCell = makeCell(`status ${status.className}`);
         statusCell.textContent = status.label;
 
-        row.append(rankCell, repoCell, languageCell, velocityCell, starsCell, statusCell);
+        row.append(rankCell, repoCell, genreCell, velocityCell, starsCell, statusCell);
         fragment.append(row);
       });
 
       repoList.replaceChildren(fragment);
       velocityButton.setAttribute("aria-pressed", String(sortMode === "velocity"));
       starsButton.setAttribute("aria-pressed", String(sortMode === "stars"));
+      japaneseButton.setAttribute("aria-pressed", String(descriptionLanguage === "ja"));
+      englishButton.setAttribute("aria-pressed", String(descriptionLanguage === "en"));
     }
 
     function setSortMode(mode) {
@@ -375,6 +460,74 @@
 
     velocityButton.addEventListener("click", () => setSortMode("velocity"));
     starsButton.addEventListener("click", () => setSortMode("stars"));
+    japaneseButton.addEventListener("click", () => {
+      descriptionLanguage = "ja";
+      render();
+    });
+    englishButton.addEventListener("click", () => {
+      descriptionLanguage = "en";
+      render();
+    });
+
+    function showTooltip(trigger) {
+      if (!trigger?.dataset.tooltip) return;
+      tooltipTrigger = trigger;
+      tooltip.textContent = trigger.dataset.tooltip;
+      tooltip.hidden = false;
+      const triggerRect = trigger.getBoundingClientRect();
+      const tooltipRect = tooltip.getBoundingClientRect();
+      const gap = 7;
+      let left = triggerRect.left + (triggerRect.width - tooltipRect.width) / 2;
+      left = Math.max(12, Math.min(left, window.innerWidth - tooltipRect.width - 12));
+      let top = triggerRect.bottom + gap;
+      if (top + tooltipRect.height > window.innerHeight - 12) {
+        top = Math.max(12, triggerRect.top - tooltipRect.height - gap);
+      }
+      tooltip.style.left = `${left}px`;
+      tooltip.style.top = `${top}px`;
+    }
+
+    function hideTooltip(trigger) {
+      if (trigger && tooltipTrigger !== trigger) return;
+      tooltip.hidden = true;
+      tooltipTrigger = null;
+    }
+
+    document.addEventListener("pointerover", (event) => {
+      if (event.pointerType === "touch") return;
+      const trigger = event.target.closest("[data-tooltip]");
+      if (trigger) showTooltip(trigger);
+    });
+    document.addEventListener("pointerout", (event) => {
+      if (event.pointerType === "touch") return;
+      const trigger = event.target.closest("[data-tooltip]");
+      if (trigger && !trigger.contains(event.relatedTarget)) hideTooltip(trigger);
+    });
+    document.addEventListener("focusin", (event) => showTooltip(event.target.closest("[data-tooltip]")));
+    document.addEventListener("focusout", (event) => hideTooltip(event.target.closest("[data-tooltip]")));
+    document.addEventListener("click", (event) => {
+      const trigger = event.target.closest("[data-tooltip]");
+      if (!trigger) {
+        document.querySelectorAll("[data-touch-armed]").forEach((element) => delete element.dataset.touchArmed);
+        hideTooltip();
+        return;
+      }
+      if (matchMedia("(hover: none)").matches) {
+        if (trigger.matches("a") && trigger.dataset.touchArmed !== "true") {
+          event.preventDefault();
+          document.querySelectorAll("[data-touch-armed]").forEach((element) => delete element.dataset.touchArmed);
+          trigger.dataset.touchArmed = "true";
+        }
+        showTooltip(trigger);
+        return;
+      }
+      tooltipTrigger === trigger && !tooltip.hidden ? hideTooltip(trigger) : showTooltip(trigger);
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") hideTooltip();
+    });
+    window.addEventListener("resize", () => tooltipTrigger && showTooltip(tooltipTrigger));
+    window.addEventListener("scroll", () => hideTooltip(), true);
 
     // ページが行う通信は、このJSON取得だけに限定する。
     fetch("data/latest.json")
@@ -385,7 +538,26 @@
       .then((data) => {
         if (!Array.isArray(data.repos)) throw new Error("Invalid data");
 
+        const genreDefs = data.genre_defs;
+        if (genreDefs && Array.isArray(genreDefs.genres) && genreDefs.unknown) {
+          genresById = new Map(
+            [...genreDefs.genres, genreDefs.unknown].map((genre) => [genre.id, genre]),
+          );
+        }
         repositories = data.repos;
+        if (
+          Number.isInteger(data.translated_count) &&
+          Number.isInteger(data.translated_total) &&
+          data.translated_count >= 0 &&
+          data.translated_total >= 0 &&
+          data.translated_count <= data.translated_total
+        ) {
+          const progress = `日本語訳 ${numberFormat.format(data.translated_count)}/${numberFormat.format(data.translated_total)}件`;
+          translationProgress.textContent = data.translated_count === data.translated_total
+            ? progress
+            : `${progress}（毎日少しずつ増えます）`;
+          translationProgress.hidden = false;
+        }
         const generatedAt = Date.parse(data.generated_at);
         if (Number.isFinite(generatedAt)) referenceTime = generatedAt;
 

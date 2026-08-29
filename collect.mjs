@@ -3,10 +3,15 @@ import path from "node:path";
 
 const SNAPSHOT_DIR = path.join("data", "snapshots");
 const LATEST_PATH = path.join("data", "latest.json");
+const TRANSLATIONS_PATH = path.join("data", "translations.json");
+const GENRES_PATH = "genres.json";
 const API_URL = "https://api.github.com/search/repositories";
+const TRANSLATION_API_URL = "https://api.mymemory.translated.net/get";
 const REQUEST_INTERVAL_MS = 2_000;
 const MAX_RETRIES = 3;
 const DAY_MS = 24 * 60 * 60 * 1_000;
+const TRANSLATION_INTERVAL_MS = 700;
+const MAX_NEW_TRANSLATIONS = 80;
 
 // 通常は10ページ取得する。動作確認時だけページ数を少なくできるようにする。
 const pages = Number.parseInt(process.env.COLLECT_PAGES ?? "10", 10);
@@ -64,7 +69,117 @@ function parseSnapshotDate(fileName) {
     : { date: match[1], timestamp: date.getTime(), fileName };
 }
 
+function isTranslationQuotaWarning(value) {
+  if (typeof value !== "string") return false;
+  const upperValue = value.toUpperCase();
+  return upperValue.includes("MYMEMORY WARNING") ||
+    upperValue.includes("ALL AVAILABLE FREE TRANSLATIONS");
+}
+
+async function readTranslations() {
+  try {
+    const translations = JSON.parse(await readFile(TRANSLATIONS_PATH, "utf8"));
+    if (!translations || Array.isArray(translations) || typeof translations !== "object") {
+      throw new Error(`${TRANSLATIONS_PATH} の形式が不正です`);
+    }
+    for (const [original, translated] of Object.entries(translations)) {
+      if (isTranslationQuotaWarning(translated)) delete translations[original];
+    }
+    return translations;
+  } catch (error) {
+    if (error?.code === "ENOENT") return {};
+    throw error;
+  }
+}
+
+function determineGenre(repo, genreDefs) {
+  const topics = Array.isArray(repo.topics)
+    ? repo.topics.filter((topic) => typeof topic === "string").map((topic) => topic.toLowerCase())
+    : [];
+  const topicSet = new Set(topics);
+  const topicMatch = genreDefs.genres.find((genre) =>
+    genre.topics.some((topic) => topicSet.has(topic.toLowerCase())),
+  );
+  if (topicMatch) return { genre: topicMatch.id, topics: topics.slice(0, 5) };
+
+  const fallbackId = repo.language
+    ? genreDefs.language_fallback[repo.language]
+    : undefined;
+  const fallbackExists = genreDefs.genres.some((genre) => genre.id === fallbackId);
+  return {
+    genre: fallbackExists ? fallbackId : genreDefs.unknown.id,
+    topics: topics.slice(0, 5),
+  };
+}
+
+async function addTranslations(repos, translations) {
+  const descriptions = [...new Set(
+    repos.map((repo) => repo.description).filter(Boolean),
+  )];
+  const cachedCount = descriptions.filter((description) =>
+    Object.hasOwn(translations, description),
+  ).length;
+  const missing = [...new Set(
+    [...repos]
+      .sort((a, b) => {
+        if (a.velocity === null && b.velocity === null) return b.stars - a.stars;
+        if (a.velocity === null) return 1;
+        if (b.velocity === null) return -1;
+        return b.velocity - a.velocity || b.stars - a.stars;
+      })
+      .map((repo) => repo.description)
+      .filter((description) =>
+        description && !Object.hasOwn(translations, description),
+      ),
+  )].slice(0, MAX_NEW_TRANSLATIONS);
+  let newCount = 0;
+  let failedCount = 0;
+  let quotaExhausted = false;
+
+  for (let index = 0; index < missing.length; index += 1) {
+    if (index > 0) await sleep(TRANSLATION_INTERVAL_MS);
+    const original = missing[index];
+    try {
+      const query = new URLSearchParams({ q: original, langpair: "Autodetect|ja" });
+      const response = await fetch(`${TRANSLATION_API_URL}?${query}`);
+      if (response.status === 429) {
+        quotaExhausted = true;
+        console.warn("本日の無料翻訳枠を使い切りました。残りは明日以降に翻訳します。");
+        break;
+      }
+      const body = await response.json();
+      const translatedText = typeof body.responseData?.translatedText === "string"
+        ? body.responseData.translatedText.trim()
+        : "";
+      if (
+        Number(body.responseStatus) === 429 ||
+        isTranslationQuotaWarning(translatedText)
+      ) {
+        quotaExhausted = true;
+        console.warn("本日の無料翻訳枠を使い切りました。残りは明日以降に翻訳します。");
+        break;
+      }
+      if (
+        body.responseStatus === 200 &&
+        translatedText &&
+        translatedText !== original.trim()
+      ) {
+        translations[original] = translatedText;
+        newCount += 1;
+      } else {
+        failedCount += 1;
+      }
+    } catch {
+      failedCount += 1;
+    }
+  }
+
+  return { newCount, cachedCount, failedCount, quotaExhausted };
+}
+
 async function main() {
+  const genreDefs = JSON.parse(await readFile(GENRES_PATH, "utf8"));
+  const translations = await readTranslations();
   const collected = [];
   for (let page = 1; page <= pages; page += 1) {
     const query = new URLSearchParams({
@@ -126,11 +241,15 @@ async function main() {
     const velocity = previousStars !== undefined
       ? Number(((repo.stargazers_count - previousStars) / velocityDays).toFixed(1))
       : null;
+    const genreResult = determineGenre(repo, genreDefs);
     return {
       full_name: repo.full_name,
       html_url: repo.html_url,
       language: repo.language,
       description: repo.description?.slice(0, 120) ?? null,
+      description_ja: null,
+      genre: genreResult.genre,
+      topics: genreResult.topics,
       stars: repo.stargazers_count,
       forks: repo.forks_count,
       open_issues: repo.open_issues_count,
@@ -153,16 +272,28 @@ async function main() {
   );
   const selectedRepos = [...selectedByName.values()].sort((a, b) => b.stars - a.stars);
 
+  const translationStats = await addTranslations(selectedRepos, translations);
+  for (const repo of selectedRepos) {
+    repo.description_ja = repo.description
+      ? translations[repo.description] ?? null
+      : null;
+  }
+  await writeFile(TRANSLATIONS_PATH, JSON.stringify(translations));
+
   const latest = {
     generated_at: generatedAt.toISOString(),
     observed_since: snapshotDates[0].date,
     days_recorded: snapshotDates.length,
     compared_with: comparison?.date ?? null,
     total_tracked: collected.length,
+    genre_defs: genreDefs,
+    translated_count: selectedRepos.filter((repo) => repo.description_ja !== null).length,
+    translated_total: selectedRepos.length,
     repos: selectedRepos,
   };
   await writeFile(LATEST_PATH, JSON.stringify(latest));
   console.log(`${collected.length}件を収集し、${LATEST_PATH} を更新しました`);
+  console.log(`翻訳: 新規${translationStats.newCount}件 / キャッシュ済み${translationStats.cachedCount}件 / 失敗${translationStats.failedCount}件`);
 }
 
 main().catch((error) => {
