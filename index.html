@@ -41,6 +41,16 @@
 
     .star-note { margin: 6px 0 0; color: #4b5563; font-size: 0.875rem; }
 
+    .site-guide { margin-top: 20px; border: 1px solid #d7dae0; border-radius: 8px; background: #f5f6f8; }
+    .site-guide summary { padding: 12px 14px; color: #16181d; font-weight: 700; cursor: pointer; }
+    .site-guide summary:focus-visible { outline: 3px solid #0b4fc4; outline-offset: 2px; }
+    .site-guide-content { padding: 0 14px 16px; line-height: 1.75; }
+    .site-guide-content h2 { margin: 18px 0 4px; font-size: 1rem; line-height: 1.5; }
+    .site-guide-content h2:first-child { margin-top: 4px; }
+    .site-guide-content p, .site-guide-content dl { margin: 0; }
+    .site-guide-content dt { margin-top: 8px; font-weight: 700; }
+    .site-guide-content dd { margin-left: 0; }
+
     .observation {
       margin: 28px 0 0;
       font-weight: 600;
@@ -177,6 +187,11 @@
     .measuring, .archived { color: #4b5563; }
     .stopped { color: #8a4b00; font-weight: 700; }
 
+    .site-footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid #d7dae0; color: #4b5563; font-size: 0.8125rem; line-height: 1.6; }
+    .site-footer p { margin: 0; }
+    .site-footer p + p { margin-top: 4px; }
+    .site-footer a { color: #0b4fc4; }
+
     [hidden] { display: none !important; }
 
     @media (max-width: 600px) {
@@ -255,8 +270,37 @@
   <main>
     <header>
       <h1>GitHub Momentum</h1>
-      <p class="lead">star数の合計ではなく、いま1日あたり何star増えているかで並べます。</p>
-      <p class="star-note">star（スター）とは、GitHubの利用者が「これ良い」と思ったときに押す印です。お気に入り登録のようなものです。</p>
+      <p class="lead">GitHubは、世界中のプログラマーが自分の作ったソフトを公開している場所です。このサイトは、そこで人気の高いソフト1,000個を毎日調べて、いま伸びているものは何かを順番に並べています。</p>
+      <p class="star-note">star数の合計ではなく、いま1日あたり何star増えているかで並べます。</p>
+      <details class="site-guide">
+        <summary>はじめての方へ ── このサイトは何をしているの？</summary>
+        <div class="site-guide-content">
+          <h2>何をしているサイト？</h2>
+          <p>GitHubに公開されているソフトのうち、star（人気の印）が多い上位1,000個を、毎日1回記録しています。前の日の記録とくらべて「1日でstarがいくつ増えたか」を計算し、その多い順に並べています。</p>
+
+          <h2>なぜ「合計」ではなく「増えた数」なの？</h2>
+          <p>starの合計は、これまでに集めた総数です。10年かけて集めた24万個も、今週集めた1万個も、同じ「star数」として並んでしまいます。それでは今も伸びているのか、昔の人気が残っているだけなのかが分かりません。1日に増えた数を見ると、いま注目されているものが分かります。</p>
+
+          <h2>出てくる言葉</h2>
+          <dl>
+            <dt>GitHub</dt>
+            <dd>世界中のプログラマーが、自分の作ったソフトを公開・共有している場所です。</dd>
+            <dt>リポジトリ</dt>
+            <dd>公開されているソフト1つ分のことです。この表の1行が1つのリポジトリです。</dd>
+            <dt>star（スター）</dt>
+            <dd>「これ良い」と思った人が押す印です。お気に入り登録のようなものです。</dd>
+            <dt>勢い</dt>
+            <dd>1日あたりstarがいくつ増えたかです。数が大きいほど、今まさに人気が伸びています。</dd>
+            <dt>ジャンル</dt>
+            <dd>そのソフトが何の仲間かを自動で判定したものです。</dd>
+            <dt>状態</dt>
+            <dd>更新が止まっているソフトに付く印です。</dd>
+          </dl>
+
+          <h2>表の見方</h2>
+          <p>表の1行が1つのソフトです。名前を押すと、GitHubのページが開きます。見出しやジャンルの ⓘ にマウスを乗せると（スマートフォンではタップすると）、その言葉の説明が出ます。</p>
+        </div>
+      </details>
       <p id="observation" class="observation" aria-live="polite">観測状況を読み込んでいます</p>
     </header>
 
@@ -292,6 +336,10 @@
       </table>
     </div>
     <div id="tooltip" class="tooltip" role="tooltip" hidden></div>
+    <footer class="site-footer">
+      <p>このサイトの<a href="https://github.com/hiromi-takemoto/github-momentum" target="_blank" rel="noopener noreferrer">ソースコード</a>（GitHub）</p>
+      <p>データの出どころ: GitHub ／ 説明文の日本語訳: MyMemory ／ 毎日 朝6時(日本時間)に自動更新</p>
+    </footer>
   </main>
 
   <script>
